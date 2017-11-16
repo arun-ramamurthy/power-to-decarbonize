@@ -1,6 +1,6 @@
-Author: Arun Ramamurthy
-Organization: Environmental Progress
-Release Date: 2017.11.15
+Author: Arun Ramamurthy  
+Organization: Environmental Progress  
+Release Date: 2017.11.15  
 
 ## Directory 1: SCRIPTS
     reader.R - contains full, commented script to compile and clean BP and global BP datasets directly from sources
