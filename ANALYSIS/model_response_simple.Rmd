@@ -1,0 +1,157 @@
+---
+title: 'Statistical Theory behind Models in "Power to Decarbonize" Report'
+author: "Arun Ramamurthy | Environmental Progress"
+date: "March 13, 2018"
+output: 
+  pdf_document: default
+---
+
+This document will review the assumptions and allowances of the models used in Environmental Progress' "Power to Decarbonize" report, which used historical data of 65 nations over 51 years to characterize the factors that affect `Carbon Intensity of Energy`, a metric for a country's progress towards deep decarbonization.
+
+```{r setup, echo = F, warning = F, message=F}
+knitr::opts_chunk$set(echo = F, warning=F, message=F)
+library(tidyverse);library(broom);library(magrittr);library(lmtest)
+bp <- readRDS("~/Desktop/WORKSHOP/D/EP/SCRIPTS/Final/power-to-decarbonize/DATA/BP")
+bp_reg <- bp %>% select(Year, Country, 
+                 `Carbon Intensity of Energy (g/kWh)`, 
+                 `Solar Electricity Generation per Capita (MWh)`, 
+                 `Wind Electricity Generation per Capita (MWh)`, 
+                 `Nuclear Electricity Generation per Capita (MWh)`, 
+                 `Hydro Electricity Generation per Capita (MWh)`) 
+```
+
+To provide context, the design matrix of the models in the report is displayed below. Each row represents a single country's electricity generation system and carbon intensity in a given year.
+
+```{r bp_reg, echo = F}
+str(bp_reg)
+```
+
+We have our response variable `Carbon Intensity of Energy (g/kWh)`, and several possible explanators. The predictors used in the report were `Electricity Generation per Capacity (MWh)` for each of `Solar`, `Wind`, `Nuclear`, and `Hydro`.
+
+Of note, the models used in the report are simple non-parametric generalized additive models, which circumvent several of the stringent assumptions of linear regression. However, in light of interpretability, this follow-up report will provide four simple linear models for `Carbon Intensity of Energy`, and even show that under these more strict conditions, the assumptions still by-and-large hold. Note that all the models in the report are *simple* - that is, they each only ascertain the effect of one of the four electricity predictors on `Carbon Intensity of Energy`. Furthermore, given our evaluation of the variance-inflation factor for each of these predictors, there is a relatively low level of coliniearity between these four predictors - in real life too, deployment of each of these technologies are formed by orthogonal policies, although some energy policies may deploy sets of these technologies in conjunction.
+
+First, we regress CIE on each of these electricity generation predictors, and display the results.
+
+```{r lms}
+lms <- list(
+  bp_reg %>% filter(`Solar Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Solar Electricity Generation per Capita (MWh)`),
+  bp_reg %>% filter(`Wind Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Wind Electricity Generation per Capita (MWh)`),
+  bp_reg %>% filter(`Hydro Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Hydro Electricity Generation per Capita (MWh)`),
+  bp_reg %>% filter(`Nuclear Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Nuclear Electricity Generation per Capita (MWh)`)
+)
+names(lms) <- c("Solar", "Wind", "Hydro", "Nuclear")
+
+lms %>% map(summary)
+```
+
+A summary of the slope estimates is also given below.
+
+```{r}
+lms %>% map2_dfr(names(.), 
+                 function(model, names) {tidy(model) %>% 
+                     mutate(Model = paste("CIE ~", names %>% rep(each = 2)), p.value = round(p.value, 5)) %>% 
+                     filter(term != "(Intercept)") %>% select(Model, everything(),- term)}) 
+```
+
+Some notes about these models: although `Wind` and `Solar` have larger absolute slopes, they also have larger standard errors, and particularily for `Solar`, we do not have confidence in that these slope estimates are non-zero. Furthermore, the models for `Solar` and `Wind` have $R^2$ of 0.0003 and 0.01 respectively, much smaller than the $R^2$ for `Hydro` and `Nuclear` (0.37 and 0.43 respectively). 
+
+Given the strength of `Nuclear` as a predictor, as detailed in our report, we suspect that there may be fundamental properties about nuclear energy that cause nuclear energy deployment to be a more precise policy lever for carbon intensity than wind or solar energy. However, the models discussed in this document are purely descriptive, and do not extend into causality arguments nor statements about the nature of these technologies.
+
+We will now verify the assumptions of linear regression on each of these models. First, we evaluate the **linearity** assumption by plotting a residual plot for each model:
+
+```{r}
+lms %>% map2_dfr(., names(.), function(model, name) {
+  model %>% augment %>% mutate(`Energy Source Technology` = name) %>% rename_at(vars(ends_with("MWh.")), ~ "X")
+}) %>% mutate(`Energy Source Technology` = factor(`Energy Source Technology`, levels = names(lms), ordered = T)) %>% 
+  ggplot(aes(X, .resid, col = `Energy Source Technology`)) + geom_point() + 
+  geom_hline(yintercept = 0, col = "black", linetype = "dashed") + facet_wrap(~ `Energy Source Technology`, scales = "free_x") +
+  labs(x = "Electricity Generation per Capita (MWh)", y = "Residual", title = "Residual Plots of Simple Linear Models") + theme(legend.position = "none")
+```
+
+With the exception of Norway for hydroelectricity (seen as the sharp $45^\circ$ line in the `Hydro` facet), the linearity assumption holds for all four of these models.
+
+The second assumption of linear regression is **constant variance** of the errors. This assumption is a bit more stringent, and difficult to fulfill with this data due to the wide spread of CIE for countries with near-zero deployment of some energy source, which cause the residuals for near-zero `X` to be larger than the residuals for the rest of the feature space. However, disregarding near-zero values in our predictors, the residual bands seen above are roughly constant throughout. We can verify this with a scale-location plot for each model, as shown below.
+
+```{r}
+lms %>% map2_dfr(., names(.), function(model, name) {
+  model %>% augment %>% mutate(`Energy Source Technology` = name) %>% rename_at(vars(ends_with("MWh.")), ~ "X")
+}) %>% mutate(`Energy Source Technology` = factor(`Energy Source Technology`, levels = names(lms), ordered = T)) %>% 
+  ggplot(aes(.fitted, sqrt(abs(.std.resid)), col = `Energy Source Technology`)) + geom_point() + geom_smooth(method = "loess", col = "black", size = 2, alpha = .7) +
+  facet_wrap(~ `Energy Source Technology`, scales = "free_x") + theme(legend.position = "none") +
+  labs(x = "Predicted Carbon Intensity of Energy (g/kWh)", y = "Square-root of Standardized Residuals", title = "Scale-Location Plot for Simple Linear Models")
+```
+
+From the scale-locations plot, I suspect that outlier countries (like Norway, Sweden, Denmark, and Germany) do not fit into our simple linear models as well. Current energy analytics research at Environmental Progress is partially focused on the Scandanavian interconnected grids, as we wish to investigate the nature of these outlying cases. Additionally, we see that the uneven spread of our predictor variables, both within themselves and between energy sources, are causing some artifacts in our linear models. However, within the IQR of our predictors, our model seems to fit quite well, and there is evidence of homoskedasticity.
+
+Strictly speaking, however, the following test shows that we are reasonably certain of heteroskedasticity for `Nuclear` and `Hydro`, if we take into account these outlier countries. Further research is required to determine *how* exactly variance in our model errors is related to large-scale deployments of `Nuclear` and `Hydro`.
+
+```{r}
+lms %>% map(function(model){model %>% bptest %>% `[[`("p.value")})
+```
+
+The final assumption of linear regression is that the error terms are **identically & independently normal**. We can verify the normality assumption first by graphing a density plot of the residuals of each simple model. 
+
+```{r}
+lms %>% map2_dfr(., names(.), function(model, name) {
+  model %>% augment %>% mutate(`Energy Source Technology` = name) %>% rename_at(vars(ends_with("MWh.")), ~ "X")
+}) %>% mutate(`Energy Source Technology` = factor(`Energy Source Technology`, levels = names(lms), ordered = T)) %>% 
+  ggplot(aes(.resid, fill = `Energy Source Technology`, col = `Energy Source Technology`)) + geom_density() + 
+  facet_wrap(~ `Energy Source Technology`, scales = "fixed") + labs(x = "Residual", y = "", title = "Residual Density Plots of Simple Linear Models") + 
+  theme(legend.position = "none")
+```
+
+The error terms are in fact close to normally-distributed for each model, and the plot shows nearly consistent variance between them. In our residual plots above, we also see that the errors are independent of $X$ for the most part, with the previously noted exception of some outlier countries. 
+
+Finally, we wish to test if the errors are independent of each other. Due to the time-series nature of our data, this assumption will not strictly hold. However, graphs of residuals over time show that the variance does not shift much over time, and we further note that we can fix this particular deviation from the assumptions of linear regression if we included `Year` as a predictor in each of the simple models.
+
+```{r, eval = F}
+resid_simple <- bp_reg %>% lm(formula = `Carbon Intensity of Energy (g/kWh)` ~ Nuclear + Year) %>% augment %>% pull(.resid)
+n_basic <- length(resid_simple)
+p_basic <- 2 
+
+est_Sigma <- function(e, n, p) {(e %*% t(e)) / (n - p)}
+est_sigma <- function(e, n, p) {est_Sigma(resid, n_basic, p_basic) %>% diag %>% sum %>% sqrt}
+matrix.as.dataframe <- function(a) {which(a == a, arr.ind = T) %>% cbind(as.vector(a)) %>% as.data.frame %>% rename_at(vars(- row, - col), function(x){"value"})}
+
+est_Sigma(resid_basic, n_basic, p_basic) %>% matrix.as.dataframe %>% filter(row <= 1000, col <= 1000) %>%
+  ggplot(aes(col, row, fill = value)) + geom_tile() + scale_fill_gradient2(low = "black", mid = "white", high = "black") +
+  ggtitle("Covariance Matrix of Residuals")
+```
+```{r}
+lms_year <- list(
+  bp_reg %>% filter(`Solar Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Solar Electricity Generation per Capita (MWh)`) %>% 
+    augment(bp_reg %>% filter(`Solar Electricity Generation per Capita (MWh)` > 0)),
+  bp_reg %>% filter(`Wind Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Wind Electricity Generation per Capita (MWh)`) %>% 
+     augment(bp_reg %>% filter(`Wind Electricity Generation per Capita (MWh)` > 0)),
+  bp_reg %>% filter(`Hydro Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Hydro Electricity Generation per Capita (MWh)`) %>% 
+     augment(bp_reg %>% filter(`Hydro Electricity Generation per Capita (MWh)` > 0)),
+  bp_reg %>% filter(`Nuclear Electricity Generation per Capita (MWh)` > 0) %>% 
+    lm(data = ., formula = `Carbon Intensity of Energy (g/kWh)` ~ `Nuclear Electricity Generation per Capita (MWh)`) %>% 
+     augment(bp_reg %>% filter(`Nuclear Electricity Generation per Capita (MWh)` > 0))
+) 
+names(lms_year) <- c("Solar", "Wind", "Hydro", "Nuclear")
+lms_year %>% map2_dfr(., names(.), function(aug, name) {
+  aug %>% mutate(`Energy Source Technology` = name) %>% mutate(`Energy Source Technology` = factor(`Energy Source Technology`, levels = names(lms_year), ordered = T)) 
+}) %>%
+  ggplot(aes(Year, .resid, col = `Energy Source Technology`)) + geom_point() + geom_hline(yintercept = 0, col = "black", linetype = "dashed") + 
+  facet_wrap(~ `Energy Source Technology`, scales = "fixed") + labs(x = "Year", y = "Residual", title = "Residual Plots against Time of Simple Linear Models") + 
+  theme(legend.position = "none")
+```
+
+Finally, a couple of *desirable* properties of our data is a nice spread to our explanatory variables, and lack of colinearity in our predictors. 
+
+Unfortunately, as the density plots below indicate, our data is heavily right-skewed - however, we do have a large range in explanatory outcomes, so they characterize the effects of a sizeable portion of the feature space. Having tried various Box-Cox transformations, I wasn't able to find a single interpretable transformation for all four predictors. Secondly, as stated above, investigation into the variance-inflation factors of each predictor show only slight colinearity, in the case of `Solar` and `Wind`, with the other predictors, and lack of colinearity for `Hydro` and `Nuclear`.
+
+```{r}
+bp_reg %>% select(-`Carbon Intensity of Energy (g/kWh)`, - Country, - Year) %>% gather(Variable, Value) %>%
+  ggplot(aes(Value)) + geom_density(aes(fill = Variable)) + facet_wrap(~ Variable, scales = "free") + theme(legend.position = "bottom", legend.direction = "vertical")
+```
+
+This concludes our analysis of the validity of simple linear models as applied to the central problem detailed in the "Power to Decarbonize" report. Please send any questions to [this author's inbox](mailto:contact@arun.run) or via [Twitter](https://twitter.com/@Ramamurthy_Arun).
