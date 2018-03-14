@@ -2,6 +2,12 @@ Author: Arun Ramamurthy
 Organization: Environmental Progress  
 Release Date: 2017.11.15  
 
+This is the associated data, scripts, and plots for Environmental Progress' "Power to Decarbonize" Report, which evaluates the historic effectiveness of governmental policies for decarbonization, especially in consideration to various electricity technologies. 
+
+The full report is contained in this repository, but can also be viewed on the [EP website](http://environmentalprogress.org/big-news/2017/11/7/the-power-to-decarbonize). In November 2017, this report was the subject of Eduardo Porter's New York Times piece, ["Wind and Solar Power Advance, but Carbon Refuses to Retreat"](https://www.nytimes.com/2017/11/07/business/climate-carbon-renewables.html).
+
+All scripts were written by Arun Ramamurthy in Summer/Fall 2017, and the cleaned data was extracted from publicly available datasets. 
+
 ## Directory 1: SCRIPTS
     reader.R - contains full, commented script to compile and clean BP and global BP datasets directly from sources
 ## Directory 2: DATA
